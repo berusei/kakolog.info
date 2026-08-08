@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Google tag (gtag.js) -->
+  <!-- SPA なので検索ごとのページ遷移は history.pushState（app.js の syncURL）で起きる。
+       GA4 の「拡張計測機能 > ブラウザの履歴イベントに基づくページの変更」が既定で
+       有効なので、これが検索ごとの page_view を拾う。こちら側で gtag('event','page_view')
+       を足すと二重計上になるので足さないこと -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-D8FNNLEMTN"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+
+    gtag('config', 'G-D8FNNLEMTN');
+  </script>
+
+  <title>KakologInfo - 5ch(2ch)過去ログ検索</title>
+  <meta name="description"
+    content="5ちゃんねる（旧2ちゃんねる）の過去ログスレッドタイトル検索。1.3億件超のスレタイを、板・期間で絞り込んで1文字から部分一致検索できます。本文（dat）は扱わず、タイトル・板名・作成日のみを索引しています。">
+  <!-- keywords は Google では順位に影響しない（2009年に公式に無視を表明）。
+     一部の国内検索エンジン・サイト内検索・アーカイブが今も参照するため、
+     実際のページ内容と一致する範囲でのみ置いている。増やしても効果はない -->
+  <meta name="keywords" content="5ch,2ch,5ちゃんねる,2ちゃんねる,過去ログ,過去ログ検索,スレタイ,スレタイ検索,スレッドタイトル,dat落ち,ログ検索,掲示板検索">
+  <meta name="author" content="KakologInfo">
+
+  <!-- 既定はインデックス可。検索結果（?q=…）では nginx が X-Robots-Tag を、
+     app.js がこのタグを noindex に差し替える（仕様書13.4・17.3） -->
+  <meta name="robots" content="index, follow">
+  <!-- 正規URL。www 付き・?utm_ 付きなどの重複を1つに寄せる。
+     検索結果ページでは app.js が自己参照（現在のURL）へ差し替える -->
+  <link rel="canonical" href="https://kakolog.info/">
+
+  <meta name="theme-color" content="#f2f2f5">
+  <!-- スレタイの数字列が iOS で電話番号としてリンク化されるのを防ぐ -->
+  <meta name="format-detection" content="telephone=no">
+
+  <!-- OGP（Facebook / LINE / Discord / Slack などの共有カード）。
+     クローラは JS を実行しないため、ここは常にサイト全体の説明で固定する。
+     検索語ごとにカードを出し分けるにはサーバー側でのHTML生成が要る -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="KakologInfo">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:url" content="https://kakolog.info/">
+  <meta property="og:title" content="KakologInfo - 5ch(2ch)過去ログ検索">
+  <meta property="og:description" content="1.3億件超の5ch過去ログスレッドタイトルを、板・期間で絞り込んで検索できます。">
+  <meta property="og:image" content="https://kakolog.info/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="KakologInfo - 5ch(2ch)過去ログ検索">
+
+  <!-- X（Twitter）カード。公式アカウントが無いため twitter:site は置かない -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="KakologInfo - 5ch(2ch)過去ログ検索">
+  <meta name="twitter:description" content="1.3億件超の5ch過去ログスレッドタイトルを、板・期間で絞り込んで検索できます。">
+  <meta name="twitter:image" content="https://kakolog.info/og.png">
+  <meta name="twitter:image:alt" content="KakologInfo - 5ch(2ch)過去ログ検索">
+
+  <!-- アイコン類は build/gen-assets.py が生成する -->
+  <link rel="icon" href="./favicon.ico" sizes="32x32">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+
+  <link rel="stylesheet" href="./style.css">
+
+  <!-- 構造化データ。SearchAction は Google のサイトリンク検索ボックスの候補になる
+     （出るかどうかは Google 側の判断で、宣言しても保証はされない）。
+     target の URL 形式は app.js の syncURL（?q=…）と必ず一致させること -->
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://kakolog.info/#website",
+      "url": "https://kakolog.info/",
+      "name": "KakologInfo",
+      "alternateName": "5ch（2ch）過去ログ スレタイ検索",
+      "description": "5ちゃんねる（旧2ちゃんねる）の過去ログスレッドタイトル検索サイト。",
+      "inLanguage": "ja",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://kakolog.info/?q={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    },
+    {
+      "@type": "WebApplication",
+      "@id": "https://kakolog.info/#app",
+      "name": "KakologInfo",
+      "url": "https://kakolog.info/",
+      "applicationCategory": "BrowserApplication",
+      "operatingSystem": "All",
+      "browserRequirements": "Requires JavaScript",
+      "inLanguage": "ja",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "JPY" },
+      "description": "1.3億件超の5ch過去ログスレッドタイトルを、板・期間で絞り込んで1文字から部分一致検索できます。"
+    }
+  ]
+}
+</script>
+</head>
+
+<body>
+  <div class="page">
+
+    <header class="site-header">
+      <div class="header-bar">
+        <a class="brand" href="/" title="トップに戻る">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="brand-icon">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-3.8-3.8"></path>
+          </svg>
+          <span class="brand-text">
+            <span class="brand-name">KakologInfo</span>
+            <span class="brand-sub">5ch（2ch）過去ログスレタイ検索サイト</span>
+          </span>
+        </a>
+        <nav class="tabs-list" id="navTabs">
+          <button class="tabs-trigger" data-tab="list">スレタイ検索</button>
+          <!-- ホットワード機能は初版では非実装（仕様書17.2）。マークアップは温存し
+           FEATURES.hotWords=false のとき app.js が DOM ごと取り除く -->
+          <button class="tabs-trigger" data-tab="words" data-feature="hotWords">人気ワード</button>
+          <button class="tabs-trigger" data-tab="about">このサイトについて</button>
+        </nav>
+        <button class="icon-btn desktop-only" id="favBtn" title="お気に入り一覧">
+          <span class="star" id="favBtnStar">★</span>
+        </button>
+        <button class="icon-btn desktop-only" id="gearBtn" title="設定" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            stroke-linejoin="round" class="gear-icon">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
+            </path>
+          </svg>
+        </button>
+        <button class="icon-btn mobile-only menu-btn" id="menuBtn" aria-label="メニュー" aria-expanded="false">
+          <span class="burger"><span class="bar" id="barTop"></span><span class="bar" id="barMid"></span><span
+              class="bar" id="barBot"></span></span>
+        </button>
+      </div>
+
+      <div class="mobile-menu" id="mobileMenu">
+        <div class="dropdown-menu">
+          <button class="dropdown-item" data-tab="list">スレタイ検索</button>
+          <button class="dropdown-item" data-tab="words" data-feature="hotWords">人気ワード</button>
+          <button class="dropdown-item" data-tab="about">このサイト</button>
+          <div class="dropdown-sep"></div>
+          <button class="dropdown-item" id="mFavBtn"><span class="star" id="mFavStar">★</span> お気に入り一覧</button>
+          <button class="dropdown-item" id="mGearBtn">表示設定</button>
+        </div>
+      </div>
+
+      <div class="popover settings" id="settings" hidden>
+        <div class="popover-head">
+          <h2>表示設定</h2>
+          <button class="link-quiet" id="settingsClose">閉じる</button>
+        </div>
+        <div class="sep"></div>
+        <div class="settings-body">
+          <label class="setting-row">1ページの表示件数
+            <select id="setPer" class="select-trigger">
+              <option value="30">30件</option>
+              <option value="50" selected>50件</option>
+              <option value="100">100件</option>
+            </select>
+          </label>
+          <label class="setting-row">板名を表示
+            <input type="checkbox" id="setShowBoard" class="checkbox" checked>
+          </label>
+          <label class="setting-row">スレッドを別タブで開く
+            <input type="checkbox" id="setNewTab" class="checkbox" checked>
+          </label>
+        </div>
+        <div class="sep"></div>
+        <div class="settings-body">
+          <div class="ng-head">
+            <h3>NGワード</h3>
+            <span class="ng-count" id="ngCount">未設定</span>
+          </div>
+          <textarea id="setNg" rows="4" class="textarea" placeholder="1行に1語（例）&#10;アフィ&#10;業者"
+            aria-label="NGワード"></textarea>
+          <p class="hint">これらの語を含むスレタイを一覧から除外します（この端末のみ）。</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="main" id="main">
+      <div class="main-col">
+
+        <section id="viewList">
+          <section class="card">
+            <form id="searchForm" class="search-form">
+              <div class="input-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <path d="m20 20-3.8-3.8"></path>
+                </svg>
+                <input id="q" class="input" placeholder="スレタイを検索（例: 台風 -実況）" aria-label="スレタイ検索" autocomplete="off">
+                <button type="button" id="clearQ" class="clear-btn" title="クリア" hidden>✕</button>
+              </div>
+              <button type="submit" class="btn btn-primary">検索</button>
+            </form>
+            <div class="sep"></div>
+            <div class="filters">
+              <div class="select-box">
+                <select id="board" class="select-trigger" aria-label="板">
+                  <option value="">全板</option>
+                </select>
+                <span class="select-icon">▼</span>
+              </div>
+              <div class="select-box">
+                <select id="year" class="select-trigger" aria-label="年">
+                  <option value="">全期間</option>
+                </select>
+                <span class="select-icon">▼</span>
+              </div>
+              <!-- 月・日は上位が選ばれて初めて出す（年→月→日）。
+                   最初から3つ並べると、ほとんどの人が使わない絞り込みで場所を取るため -->
+              <div class="select-box" id="monthBox" hidden>
+                <select id="month" class="select-trigger" aria-label="月">
+                  <option value="">通年</option>
+                </select>
+                <span class="select-icon">▼</span>
+              </div>
+              <div class="select-box" id="dayBox" hidden>
+                <select id="day" class="select-trigger" aria-label="日">
+                  <option value="">月内すべて</option>
+                </select>
+                <span class="select-icon">▼</span>
+              </div>
+              <div class="select-box push-right">
+                <select id="sort" class="select-trigger" aria-label="表示順">
+                  <option value="new">最新順</option>
+                  <option value="old">古い順</option>
+                </select>
+                <span class="select-icon">▼</span>
+              </div>
+            </div>
+            <div class="sep"></div>
+            <div class="quick-boards" id="quickBoards"></div>
+          </section>
+
+          <div class="scope-line" id="scopeLine" hidden>
+            <span class="scope" id="scopeLabel"></span>
+            <span id="countLabel"></span>
+          </div>
+
+          <div class="notice" id="notice" hidden></div>
+
+          <section class="card loading-card" id="loadingCard" role="status" aria-live="polite" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span>検索中…</span>
+          </section>
+
+          <section class="card" id="resultsCard" hidden>
+            <div id="rows"></div>
+            <div class="empty" id="emptyState" hidden>
+              <p class="empty-title">該当するスレタイはありません。</p>
+              <p class="empty-hint">語を減らす／除外語（-語）を外す／板・年の条件を戻すと見つかることがあります。</p>
+            </div>
+          </section>
+
+          <section class="card welcome" id="welcome">
+            <p class="welcome-title">1.3億件超のスレタイから検索</p>
+            <p class="welcome-hint">キーワードを入力して検索してください。スペース区切りで AND、先頭に -（マイナス）で除外できます。<br>1文字だけで検索する場合は、板または年の指定が必要です。<br>板と年の両方を選べば、キーワードなしでもスレッド一覧を表示できます（該当が25万件以下の場合）。
+            </p>
+          </section>
+
+          <nav class="pagination" id="pagination" hidden></nav>
+        </section>
+
+        <section id="viewFavs" hidden>
+          <section class="card">
+            <div class="card-header">
+              <h2 class="card-title">★ お気に入り一覧</h2>
+              <span class="card-desc">この端末に保存されています</span>
+            </div>
+            <div class="sep"></div>
+            <div id="favRows"></div>
+            <div class="empty" id="favEmpty" hidden>
+              <p class="empty-title">お気に入りはまだありません。</p>
+              <p class="empty-hint">検索結果の ★ を押すと、ここに保存されます。</p>
+            </div>
+          </section>
+        </section>
+
+        <!-- 人気ワードタブ（仕様書17.2: 初版非実装。FEATURES.hotWords=false で DOM から除去） -->
+        <section id="viewWords" data-feature="hotWords" hidden>
+          <section class="card">
+            <div class="card-header">
+              <h2 class="card-title">人気ワード（全板・直近30日）</h2>
+              <span class="card-desc">クリックで検索</span>
+            </div>
+            <div class="sep"></div>
+            <div class="hotwords" id="allWords">Coming soon...</div>
+          </section>
+        </section>
+
+        <section id="viewAbout" hidden>
+          <section class="card">
+            <div class="card-header">
+              <h2 class="card-title">このサイトについて</h2>
+            </div>
+            <div class="sep"></div>
+            <div class="about-body">
+              <p class="about-lead">
+                5ちゃんねる（旧2ちゃんねる）の過去ログの<strong>スレッドタイトル・板名・作成日時</strong>のみを索引した検索サイトです。本文（dat）は保存・配信していません。ヒットしたスレッドは 5ch
+                上の元ページで開きます。</p>
+              <div class="about-sec">
+                <h3>検索構文</h3>
+                <div class="syntax-grid">
+                  <code>台風 上陸</code><span>両方を含む（AND）</span>
+                  <code>-実況</code><span>その語を含むものを除外</span>
+                  <code>"冷やし中華"</code><span>通常の部分一致として検索（引用符は無視されます）</span>
+                </div>
+              </div>
+              <div class="about-sec">
+                <h3>収録状況</h3>
+                <div class="stats-grid">
+                  <span class="stat">収録タイトル<span class="stat-val" id="statThreads">—</span></span>
+                  <span class="stat">収録板<span class="stat-val" id="statBoards">—</span></span>
+                  <span class="stat">最終更新<span class="stat-val" id="statUpdated">—</span></span>
+                </div>
+              </div>
+              <div class="about-sec">
+                <h3>削除・お問い合わせ</h3>
+                <p class="about-contact">バグや不具合報告等は <a id="contactLink"
+                    href="https://docs.google.com/forms/d/1VBJehP2ViQLBwwA2P6WIaPDxkqW8TUPOWpWJiKOtOds/edit?usp=forms_home&ouid=111007523527468014816&ths=true">こちらのフォーム</a>
+                  までご連絡ください。
+                </p>
+              </div>
+            </div>
+          </section>
+        </section>
+      </div>
+
+      <!-- 話題のキーワード欄（仕様書17.2: 初版非実装。DOM ごと除去される） -->
+      <aside class="rail" id="rail" data-feature="hotWords">
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title">話題のキーワード</h2>
+            <span class="card-desc">全板</span>
+          </div>
+          <div class="sep"></div>
+          <div class="rail-words" id="railWords">
+            Coming soon...
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      スレッドタイトル・板名・作成日のみを索引しています。本文（dat）の保存・再配信は行っておりません。<br>
+      <span id="footUpdated"></span><br>
+      ©KakologInfo
+    </footer>
+  </div>
+  <script src="./app.js"></script>
+</body>
+
+</html>

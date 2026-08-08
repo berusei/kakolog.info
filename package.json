@@ -1,0 +1,11 @@
+{
+  "name": "kakolog-info-web",
+  "private": true,
+  "description": "フロントエンドのスモークテスト用。配信物には一切含まれない（web/src はビルド不要の素の JS）",
+  "scripts": {
+    "test": "node web/test/smoke.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}

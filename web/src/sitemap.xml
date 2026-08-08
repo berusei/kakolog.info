@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 単一ページの SPA なので、インデックス対象のURLはトップだけ。
+     検索結果（/?q=…）は noindex なので載せない（載せると矛盾した指示になる）。
+     板ごとの静的ページを作った場合はここに追加する。 -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://kakolog.info/</loc>
+  </url>
+</urlset>

@@ -1,0 +1,23 @@
+# 検索 API（仕様書13.1）
+# 配置先: /etc/systemd/system/kakosearch-api.service
+[Unit]
+Description=KakologInfo search API
+After=network.target manticore.service
+Wants=manticore.service
+
+[Service]
+User=kakosearch
+Group=kakosearch
+EnvironmentFile=/etc/kakosearch/api.env
+ExecStart=/opt/kakosearch/bin/kakoapi
+Restart=on-failure
+RestartSec=10
+# API が肥大しても searchd を OOM の巻き添えにしない（仕様書13.1）
+MemoryMax=150M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

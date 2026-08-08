@@ -1,0 +1,9 @@
+<!-- ヘッダーの brand-icon と同じ虫眼鏡。色は style.css の primary 変数と同値。
+     ラスタ版（favicon.ico / apple-touch-icon.png）は build/gen-assets.py が生成する -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#0071e3"/>
+  <g fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round">
+    <circle cx="28.5" cy="28.5" r="12"/>
+    <path d="M37.5 37.5 47 47"/>
+  </g>
+</svg>

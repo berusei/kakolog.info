@@ -1,0 +1,18 @@
+db/
+*.db
+*.db-wal
+*.db-shm
+bin/
+docs/
+build/*/data/
+build/charset-test/test.tsv
+build/charset-test/chars.txt
+build/e2e-test/*.tsv
+build/**/searchd.log
+build/**/query.log
+build/**/searchd.pid
+*.Zone.Identifier
+CLAUDE.md
+
+# フロントのスモークテスト用（jsdom）。配信物には含まれない
+node_modules/

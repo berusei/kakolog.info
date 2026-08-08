@@ -1,0 +1,9 @@
+User-agent: *
+Disallow: /api/
+
+# 検索結果（/?q=…）はここでは Disallow しない。robots.txt で弾くとクローラが
+# ページ自体を取得できず、nginx の X-Robots-Tag と <meta name="robots"> の
+# noindex を読めなくなるため（＝URLだけが検索結果に残る）。
+# 深いページネーションからサービスを守る役目は noindex とレート制限が担う。
+
+Sitemap: https://kakolog.info/sitemap.xml
