@@ -4,9 +4,10 @@
 //
 // フロー（依頼者指定）:
 //  1. board-urls.json の url + kako0000.html を開く（ページは新しい順に並ぶ）
-//  2. DB 上の最新 thread_key（アンカー。日付バグスレ除外のため thread_key < 現在時刻）を探す
-//  3. 0000 からインクリメントし、アンカーが見つかるまでページを進める
-//  4. そこまでに取得済みのページ（= 追加分を含む）のエントリを DB へ投入する
+//  2. ページ冒頭の「Latest update」を読み、前回スキャン時から進んでいなければ板ごとスキップ
+//  3. DB 上の最新 thread_key（アンカー。日付バグスレ除外のため thread_key < 現在時刻）を探す
+//  4. 0000 からインクリメントし、アンカーが見つかるまでページを進める
+//  5. そこまでに取得済みのページ（= 追加分を含む）のエントリを DB へ投入する
 //     （デクリメントでの再取得は不要。インクリメント時に内容を保持している）
 //
 // 404・更新なしの板はスキップする。
@@ -24,6 +25,8 @@ import (
 
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
+
+	"kakosearch/internal/docid"
 )
 
 // Entry は一覧ページの1スレッド分。
@@ -56,6 +59,33 @@ func Parse(page string) []Entry {
 		})
 	}
 	return out
+}
+
+// 一覧ページ冒頭に載っているページ自体の生成時刻。
+//
+//	<p><em class="total">Total: 2629 thread(s)</span> <span class="latest">Latest update: 2026/08/07 21:27:00</em></p>
+//
+// ★ 閉じタグが </em> になっている壊れたマークアップなので、</span> を当てにしてはならない。
+// ラベル文字列（"Latest update:"）も板によって違いうるため、class="latest" の直後に
+// 現れる最初の日時だけを拾う。値は Last-Modified ヘッダと一致する JST。
+var latestRe = regexp.MustCompile(
+	`class="latest">[^<]*?(\d{4})/(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})`)
+
+// ParseLatest は一覧ページの「Latest update」を返す。記載が無ければ ok=false。
+func ParseLatest(page string) (t time.Time, ok bool) {
+	m := latestRe.FindStringSubmatch(page)
+	if m == nil {
+		return time.Time{}, false
+	}
+	n := make([]int, 6)
+	for i := range n {
+		v, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			return time.Time{}, false
+		}
+		n[i] = v
+	}
+	return time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], 0, docid.JST), true
 }
 
 var charsetRe = regexp.MustCompile(`(?i)charset=["']?([a-zA-Z0-9_\-]+)`)
@@ -113,9 +143,15 @@ func PageURL(base string, page int) string {
 	return fmt.Sprintf("%skako%04d.html", base, page)
 }
 
-// FetchPage は1ページ取得して解析する。404/410 は (nil, true, nil)。
+// Page は一覧ページ1枚分の解析結果。
+type Page struct {
+	Entries []Entry
+	Latest  time.Time // ページ自身が申告する生成時刻。ゼロ値 = 記載が無かった
+}
+
+// FetchPage は1ページ取得して解析する。404/410 は (Page{}, true, nil)。
 // ネットワークエラーと 5xx は3秒空けて1回だけ再試行する。
-func (c *Client) FetchPage(base string, page int) (entries []Entry, notFound bool, err error) {
+func (c *Client) FetchPage(base string, page int) (p Page, notFound bool, err error) {
 	url := PageURL(base, page)
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
@@ -128,7 +164,7 @@ func (c *Client) FetchPage(base string, page int) (entries []Entry, notFound boo
 
 		req, rerr := http.NewRequest("GET", url, nil)
 		if rerr != nil {
-			return nil, false, rerr
+			return Page{}, false, rerr
 		}
 		req.Header.Set("User-Agent", c.UserAgent)
 		resp, derr := c.HTTP.Do(req)
@@ -144,48 +180,71 @@ func (c *Client) FetchPage(base string, page int) (entries []Entry, notFound boo
 		}
 		switch {
 		case resp.StatusCode == http.StatusOK:
-			return Parse(decodeHTML(body, resp.Header.Get("Content-Type"))), false, nil
+			doc := decodeHTML(body, resp.Header.Get("Content-Type"))
+			out := Page{Entries: Parse(doc)}
+			if t, ok := ParseLatest(doc); ok {
+				out.Latest = t
+			}
+			return out, false, nil
 		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
-			return nil, true, nil
+			return Page{}, true, nil
 		case resp.StatusCode >= 500:
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 			continue
 		default:
-			return nil, false, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+			return Page{}, false, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
 		}
 	}
-	return nil, false, fmt.Errorf("%s: %w", url, lastErr)
+	return Page{}, false, fmt.Errorf("%s: %w", url, lastErr)
 }
 
 // Result は1板分のスキャン結果。
 type Result struct {
-	Pages       int     // 取得できたページ数（0 = kako0000.html が 404）
-	Entries     []Entry // 取得した全エントリ（thread_key で重複除去、新しい順）
-	AnchorFound bool    // アンカー thread_key に到達した
-	StoppedOld  bool    // アンカー自体は見つからないが、ページ全体が既知だったため打ち切った
-	HitLimit    bool    // maxPages に達した
+	Pages       int       // 取得できたページ数（0 = kako0000.html が 404、または Latest update でスキップ）
+	Entries     []Entry   // 取得した全エントリ（thread_key で重複除去、新しい順）
+	Latest      time.Time // kako0000.html が申告する生成時刻。ゼロ値 = 記載が無かった
+	Skipped     bool      // Latest update が since から進んでいないため板ごとスキップした
+	AnchorFound bool      // アンカー thread_key に到達した
+	StoppedOld  bool      // アンカー自体は見つからないが、ページ全体が既知だったため打ち切った
+	HitLimit    bool      // maxPages に達した
 }
 
 // ScanBoard は kako0000.html からアンカーが見つかるまでページを進め、
 // そこまでの全エントリを返す。
 //
+// since は前回この板をスキャンしたときの Latest update。kako0000.html が申告する
+// Latest update がそこから進んでいなければ、取得元に新着が無いことが確定するので
+// 1リクエストだけで打ち切る（Skipped = true）。since がゼロ値のとき、および
+// ページに Latest update の記載が無いときは、この門番は働かず必ず本スキャンへ進む。
+//
+// ★ この門番は「取りに行くかどうか」だけを決める。通過した後の判定（アンカー到達・
+// 既知判定・重複除去）は従来どおり一切省略しない。Latest update が進んでいても
+// 実際の新規が0件ということはありうる。
+//
 // アンカーのスレッドが一覧から消えている場合（削除等）の保険として、
 // ページ内の全エントリが known（既に DB に存在）になった時点でも打ち切る。
 // アンカーが 0（DB にその板の行が無い＝新規板）のときは末尾（404）まで全取得する。
-func (c *Client) ScanBoard(base string, anchor int64, known func(int64) bool, maxPages int) (Result, error) {
+func (c *Client) ScanBoard(base string, anchor int64, known func(int64) bool, maxPages int, since time.Time) (Result, error) {
 	var res Result
 	seen := map[int64]bool{}
 	for page := 0; page < maxPages; page++ {
-		entries, notFound, err := c.FetchPage(base, page)
+		p, notFound, err := c.FetchPage(base, page)
 		if err != nil {
 			return res, err
 		}
-		if notFound || len(entries) == 0 {
+		if notFound || len(p.Entries) == 0 {
 			return res, nil // page=0 なら板ごとスキップ、それ以外は末尾到達
+		}
+		if page == 0 {
+			res.Latest = p.Latest
+			if !p.Latest.IsZero() && !since.IsZero() && !p.Latest.After(since) {
+				res.Skipped = true
+				return res, nil
+			}
 		}
 		res.Pages++
 		allKnown := true
-		for _, e := range entries {
+		for _, e := range p.Entries {
 			if e.ThreadKey == anchor {
 				res.AnchorFound = true
 			}
