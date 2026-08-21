@@ -256,6 +256,14 @@
             <span id="countLabel"></span>
           </div>
 
+          <!-- 取得元の状態のお知らせ。5ch の過去ログ倉庫が止まっていて 2ch.sc から
+               補完している間だけ出る（/api/boards の sc_fallback。復旧すれば自動で消える） -->
+          <div class="notice" id="srcNotice" hidden></div>
+
+          <!-- 収集元に無くて埋められない期間のお知らせ。選んでいる板・年が
+               app.js の DATA_GAPS に当たるときだけ出る -->
+          <div class="notice" id="gapNotice" hidden></div>
+
           <div class="notice" id="notice" hidden></div>
 
           <section class="card loading-card" id="loadingCard" role="status" aria-live="polite" hidden>

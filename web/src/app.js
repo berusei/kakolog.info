@@ -166,10 +166,20 @@ async function loadBoards() {
     // About の統計とフッター（契約差分 D3）
     $('statThreads').textContent = data.total_threads.toLocaleString('ja-JP');
     $('statBoards').textContent = data.total_boards.toLocaleString('ja-JP');
-    if (data.index_updated_at) {
-      const d = fmtDate(data.index_updated_at);
+    // ★ 出すのは「索引をビルドした時刻」ではなく「データがいつまで入っているか」。
+    // 取得元が止まっていても再構築は毎回走るため、ビルド時刻はデータの新しさを表さない
+    // （2026-08-09 に判明した表示の誤り。2026-08-21 修正）
+    const updated = data.data_updated_at || data.index_updated_at;
+    if (updated) {
+      const d = fmtDate(updated);
       $('statUpdated').textContent = d;
-      $('footUpdated').textContent = 'インデックス最終更新: ' + d;
+      $('footUpdated').textContent = 'データ最終更新: ' + d;
+    }
+    if (data.sc_fallback) {
+      const n = $('srcNotice');
+      n.textContent = '現在、5ch の過去ログ倉庫が停止しているため、一部の板のスレッドを 2ch.sc から補完しています。'
+        + 'レス数が実際より少ない場合や、リンク先が開けない場合があります。';
+      n.hidden = false;
     }
   } catch (e) {
     console.error('boards の取得に失敗', e);
@@ -407,6 +417,38 @@ async function loadBlockedYears() {
   }
 }
 
+// 収集元に残っていないために埋められない (板, 年)。
+//
+// ★ スクレイパーでは埋まらない。5ch の公開過去ログ倉庫はこの年代を持っておらず
+//   （2026-08-21 に kako/ の索引を直接確認）、元のDBを集めた経路にも入っていなかった。
+//   よって board-years.json のような自動生成ではなく、ここで手で持つ。
+//   全板の網羅調査は docs/data-gaps.md を参照。増減したらこの表を直す。
+const DATA_GAPS = {
+  livejupiter: { name: 'なんJ', years: [2012, 2013] },
+  news4vip: { name: 'ニュー速VIP', years: [2012, 2013] },
+};
+const GAP_YEARS = [2012, 2013];
+
+// 欠けている期間を見に来ている利用者に、0件の理由を先に伝える。
+// 「検索が壊れている」と「そもそも収録が無い」は利用者から区別できないため
+// （依頼者指示 2026-08-21）。
+function updateGapNotice() {
+  const n = $('gapNotice');
+  const y = state.year ? parseInt(state.year, 10) : 0;
+  const g = DATA_GAPS[state.board];
+  let msg = '';
+  if (g && (!y || g.years.indexOf(y) !== -1)) {
+    const span = g.years.length > 1 ? g.years[0] + '〜' + g.years[g.years.length - 1] + '年' : g.years[0] + '年';
+    msg = g.name + 'の' + span + 'のスレッドは、収集元に残っていないためほぼ収録できていません。'
+      + 'この期間が0件でも検索の不具合ではありません。他の経路から補えないか調査中です。';
+  } else if (!state.board && y && GAP_YEARS.indexOf(y) !== -1) {
+    msg = y + '年は、なんJ・ニュー速VIP のスレッドがほぼ収録できていません（収集元に残っていないため）。'
+      + '他の板は通常どおり検索できます。';
+  }
+  n.textContent = msg;
+  n.hidden = !msg;
+}
+
 // 選択中の期間が一覧できないと分かっているか。
 // ★ 判定できるのは記録と粒度が一致するときだけ。年→月→日の絞り込みなので、
 //   選択は常に「年ちょうど」「月ちょうど」「日ちょうど」のいずれかになり、必ず一致する。
@@ -427,6 +469,7 @@ async function doSearch() {
   const seq = ++searchSeq;
   const q = state.q.trim();
   const browse = canBrowse();
+  updateGapNotice();   // ガードで打ち切る経路でも出したいので、判定より先に置く
   if (!q && !browse) {
     // 板・年が揃っていないのに検索語もない場合。黙って何もしないと
     // 「検索できる条件」が利用者に伝わらないので、一覧の条件を案内する

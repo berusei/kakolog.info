@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"kakosearch/internal/docid"
 	"kakosearch/internal/store"
@@ -69,6 +70,19 @@ func cmdExport(args []string) error {
 	w := bufio.NewWriterSize(os.Stdout, 1<<20)
 	defer w.Flush()
 
+	// 進捗表示。indexer の collect フェーズはこの export が律速で、
+	// 1.3億行の出力に約1時間かかる。その間 indexer 自身は何も出力しない
+	// （\r で上書きする進捗は journald に残らない）ため、ここから定期的に
+	// stderr へ出す。rebuild.sh 経由なら journalctl -u kako-rebuild に出る。
+	var total int64
+	if *board == "" {
+		// boards.thread_count の合計。rebuild.sh は直前に kakoctl boards を
+		// 走らせるので新しい。取れなければ割合表示を諦めるだけ
+		_ = db.QueryRow(`SELECT COALESCE(SUM(thread_count), 0) FROM boards`).Scan(&total)
+	}
+	const progressEvery = 10_000_000
+	start := time.Now()
+
 	var written, skippedKey int64
 	buf := make([]byte, 0, 4096)
 	for rows.Next() {
@@ -114,6 +128,15 @@ func cmdExport(args []string) error {
 			return err
 		}
 		written++
+		if written%progressEvery == 0 {
+			el := time.Since(start)
+			msg := fmt.Sprintf("export --order %s: %d行出力 %s経過", *order, written, el.Round(time.Second))
+			if total > written {
+				eta := time.Duration(float64(el) * float64(total-written) / float64(written))
+				msg += fmt.Sprintf(" (%.1f%%, 残り約%s)", float64(written)*100/float64(total), eta.Round(time.Minute))
+			}
+			fmt.Fprintln(os.Stderr, msg)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -121,6 +144,7 @@ func cmdExport(args []string) error {
 	if err := w.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "export --order %s: %d行出力、thread_key範囲外の除外 %d行\n", *order, written, skippedKey)
+	fmt.Fprintf(os.Stderr, "export --order %s: %d行出力、thread_key範囲外の除外 %d行 (%s)\n",
+		*order, written, skippedKey, time.Since(start).Round(time.Second))
 	return nil
 }
