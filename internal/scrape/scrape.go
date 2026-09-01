@@ -37,8 +37,9 @@ type Entry struct {
 }
 
 // 例: <p class="main_odd">1<span class="filename">1785856507.dat</span>
-//     <span class="title"><a href="/test/read.cgi/iPhone/1785856507/">タイトル </a></span>
-//     <span class="lines">17</span></p>
+//
+//	<span class="title"><a href="/test/read.cgi/iPhone/1785856507/">タイトル </a></span>
+//	<span class="lines">17</span></p>
 var entryRe = regexp.MustCompile(
 	`<span class="filename">(\d+)\.dat</span>\s*<span class="title"><a[^>]*>(.*?)</a></span>\s*<span class="lines">(\d+)</span>`)
 
@@ -150,9 +151,23 @@ type Page struct {
 }
 
 // FetchPage は1ページ取得して解析する。404/410 は (Page{}, true, nil)。
-// ネットワークエラーと 5xx は3秒空けて1回だけ再試行する。
 func (c *Client) FetchPage(base string, page int) (p Page, notFound bool, err error) {
-	url := PageURL(base, page)
+	body, ctype, notFound, err := c.fetch(PageURL(base, page))
+	if err != nil || notFound {
+		return Page{}, notFound, err
+	}
+	doc := decodeHTML(body, ctype)
+	out := Page{Entries: Parse(doc)}
+	if t, ok := ParseLatest(doc); ok {
+		out.Latest = t
+	}
+	return out, false, nil
+}
+
+// fetch は1 URL を取得して本文と Content-Type を返す。404/410 は notFound = true。
+// ネットワークエラーと 5xx は3秒空けて1回だけ再試行する。
+// 相手は他人のサーバーなので、呼び出しの間隔（Delay）はここで一元的に効かせる。
+func (c *Client) fetch(url string) (body []byte, contentType string, notFound bool, err error) {
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
@@ -164,7 +179,7 @@ func (c *Client) FetchPage(base string, page int) (p Page, notFound bool, err er
 
 		req, rerr := http.NewRequest("GET", url, nil)
 		if rerr != nil {
-			return Page{}, false, rerr
+			return nil, "", false, rerr
 		}
 		req.Header.Set("User-Agent", c.UserAgent)
 		resp, derr := c.HTTP.Do(req)
@@ -172,7 +187,7 @@ func (c *Client) FetchPage(base string, page int) (p Page, notFound bool, err er
 			lastErr = derr
 			continue
 		}
-		body, berr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		b, berr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		resp.Body.Close()
 		if berr != nil {
 			lastErr = berr
@@ -180,22 +195,17 @@ func (c *Client) FetchPage(base string, page int) (p Page, notFound bool, err er
 		}
 		switch {
 		case resp.StatusCode == http.StatusOK:
-			doc := decodeHTML(body, resp.Header.Get("Content-Type"))
-			out := Page{Entries: Parse(doc)}
-			if t, ok := ParseLatest(doc); ok {
-				out.Latest = t
-			}
-			return out, false, nil
+			return b, resp.Header.Get("Content-Type"), false, nil
 		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
-			return Page{}, true, nil
+			return nil, "", true, nil
 		case resp.StatusCode >= 500:
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 			continue
 		default:
-			return Page{}, false, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+			return nil, "", false, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
 		}
 	}
-	return Page{}, false, fmt.Errorf("%s: %w", url, lastErr)
+	return nil, "", false, fmt.Errorf("%s: %w", url, lastErr)
 }
 
 // Result は1板分のスキャン結果。

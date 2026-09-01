@@ -263,6 +263,43 @@ async function testBlockedGranularity() {
     dayLevel.fetchLog.some((u) => u.includes('/api/search')), dayLevel.fetchLog);
 }
 
+// 収集元に無い期間の断り書き（2026-08-21 追加。依頼者指示）
+async function testDataGapNotice() {
+  console.log('欠落期間のお知らせ');
+
+  const t = boot();
+  await tick(50);
+  t.setSearch(200, {
+    query: 'test', total: 0, total_is_approximate: false, page: 1, per_page: 50,
+    max_page: 0, index_updated_at: BOARDS.index_updated_at, took_ms: 8, items: [],
+  });
+  t.search({ q: 'test', board: 'livejupiter', year: '2013' });
+  await tick(120);
+  check('なんJ 2013年で出る',
+    t.$('gapNotice').hidden === false && t.$('gapNotice').textContent.includes('なんJ'),
+    t.$('gapNotice').textContent);
+
+  // 年を外しても、その板を見ている限りは出す（0件の理由が伝わらないため）
+  t.search({ q: 'test', board: 'news4vip' });
+  await tick(120);
+  check('VIP は年未指定でも出る',
+    t.$('gapNotice').hidden === false && t.$('gapNotice').textContent.includes('ニュー速VIP'),
+    t.$('gapNotice').textContent);
+
+  // 板を選ばずに 2013年 を見ているときは、影響のある板を挙げるだけにする
+  t.search({ q: 'test', year: '2013' });
+  await tick(120);
+  check('板未指定＋2013年でも出る',
+    t.$('gapNotice').hidden === false && t.$('gapNotice').textContent.includes('2013年'),
+    t.$('gapNotice').textContent);
+
+  // 関係のない板・年では消える（前の検索の断り書きが残らないこと）
+  t.search({ q: 'test', board: 'zoid', year: '2015' });
+  await tick(120);
+  check('無関係な条件では消える', t.$('gapNotice').hidden === true, t.$('gapNotice').textContent);
+  check('JS エラーが出ていない', t.errors.length === 0, t.errors);
+}
+
 async function testNoAutoSearch() {
   console.log('条件を変えただけでは検索しない');
   const t = boot();
@@ -333,6 +370,7 @@ async function testApiErrorIsShown() {
   await testBlockedYearIsRejectedLocally();
   await testPeriodCascade();
   await testBlockedGranularity();
+  await testDataGapNotice();
   await testNoAutoSearch();
   await testURLRestore();
   await testCacheAvoidsRefetch();

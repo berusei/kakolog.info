@@ -40,7 +40,14 @@ type Server struct {
 	boardsByID   map[string]store.Board
 	boardsJSON   []byte
 	exclusions   map[string]bool
-	indexBuiltAt string // RFC3339(JST)
+	indexBuiltAt string // RFC3339(JST)。索引をビルドした時刻
+	// dataUpdatedAt は「DB に入っている最新スレの作成時刻」。フッターに出すのはこちら。
+	// 取得元が止まっていても再構築は毎回走るため、ビルド時刻はデータの新しさを表さない
+	// （docs/changes/2026-08-09.md の未修正バグ。2026-08-21 修正）。
+	dataUpdatedAt string // RFC3339(JST)
+	// scFallback は直近のスクレイプで 2ch.sc から補完した板があったことを示す。
+	// 5ch の過去ログ倉庫が復旧すれば次回の実行で 0 に戻り、表示も自動的に消える。
+	scFallback bool
 }
 
 func newServer(cfg config.Config, db *sql.DB, search Searcher) (*Server, error) {
@@ -75,19 +82,39 @@ func (s *Server) reloadBoards() error {
 	if t, perr := time.Parse(time.RFC3339, builtAt); perr == nil {
 		builtAt = t.In(docid.JST).Format(time.RFC3339)
 	}
+	dataAt, err := store.Meta(s.db, "data_updated_at")
+	if err != nil {
+		return err
+	}
+	if t, perr := time.Parse(time.RFC3339, dataAt); perr == nil {
+		dataAt = t.In(docid.JST).Format(time.RFC3339)
+	} else {
+		// 旧世代の DB（data_updated_at 未記録）ではビルド時刻で代替する。
+		// 次回の kakoctl stamp で正しい値に入れ替わる
+		dataAt = builtAt
+	}
+	scBoards, err := store.Meta(s.db, "sc_fallback_boards")
+	if err != nil {
+		return err
+	}
+	scFallback := scBoards != "" && scBoards != "0"
 	// total_threads / total_boards / index_updated_at は契約差分 D3 の裁定による追加
-	// （docs/api-contract-diff.md、依頼者承認 2026-08-05）
+	// （docs/api-contract-diff.md、依頼者承認 2026-08-05）。
+	// data_updated_at / sc_fallback は 2026-08-21 追加（docs/changes/2026-08-21.md）
 	j, err := json.Marshal(map[string]any{
 		"boards":           boards,
 		"total_threads":    totalThreads,
 		"total_boards":     len(boards),
 		"index_updated_at": builtAt,
+		"data_updated_at":  dataAt,
+		"sc_fallback":      scFallback,
 	})
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	s.boardsByIdx, s.boardsByID, s.boardsJSON, s.indexBuiltAt = byIdx, byID, j, builtAt
+	s.dataUpdatedAt, s.scFallback = dataAt, scFallback
 	s.mu.Unlock()
 	return nil
 }
@@ -198,6 +225,8 @@ type searchResponse struct {
 	PerPage            int          `json:"per_page"`
 	MaxPage            int          `json:"max_page"`
 	IndexUpdatedAt     string       `json:"index_updated_at"`
+	DataUpdatedAt      string       `json:"data_updated_at"`
+	SCFallback         bool         `json:"sc_fallback"`
 	TookMs             int64        `json:"took_ms"`
 	Items              []searchItem `json:"items"`
 }
@@ -420,6 +449,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	byIdx := s.boardsByIdx
 	exclusions := s.exclusions
 	builtAt := s.indexBuiltAt
+	dataAt := s.dataUpdatedAt
+	scFallback := s.scFallback
 	s.mu.RUnlock()
 
 	items := make([]searchItem, 0, len(ids))
@@ -471,6 +502,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		PerPage:            per,
 		MaxPage:            maxPage,
 		IndexUpdatedAt:     builtAt,
+		DataUpdatedAt:      dataAt,
+		SCFallback:         scFallback,
 		TookMs:             time.Since(start).Milliseconds(),
 		Items:              items,
 	})

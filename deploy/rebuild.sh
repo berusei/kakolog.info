@@ -39,8 +39,17 @@ check_disk
 # 2. 新規スレのスクレイプ（板ごとの過去ログ一覧 kakoNNNN.html から追加分を取得して SQLite へ）
 #    個別板の失敗は stderr に残して続行する（アンカーが進まないため次回自動で追い付く）。
 #    全板失敗（ネットワーク断など）のときのみ非0で止まり、以降の再構築を行わない。
+#    2026-08-21 追加: 5ch の過去ログ倉庫が止まっている板は 2ch.sc から補完する
+#    （docs/changes/2026-08-21.md）。対応表は毎回 BBSMENU から作り直す（1リクエスト）。
+#    失敗しても既存の JSON で続行する。板サーバーの移転はここでしか追随できないため、
+#    「取れなかったから対応表を消す」ことは絶対にしない（scboards は原子的に置換する）。
+log "scboards 更新開始"
+"$KAKOCTL" scboards --urls /opt/kakosearch/db/board-urls.json \
+  --out /opt/kakosearch/db/board-urls-sc.json || log "警告: scboards に失敗（既存の対応表で続行）"
+
 log "scrape 開始"
-"$KAKOCTL" scrape --db "$DB" --urls /opt/kakosearch/db/board-urls.json
+"$KAKOCTL" scrape --db "$DB" --urls /opt/kakosearch/db/board-urls.json \
+  --sc-urls /opt/kakosearch/db/board-urls-sc.json
 
 # 3. 新規板があれば board_idx を末尾に追加し、表示名も更新（仕様書16.2: 既存の idx は不変）
 log "boards 更新開始"

@@ -1,5 +1,5 @@
 // kakoctl は構築マシンで実行する構築・検証ツール（仕様書7章）。
-// サブコマンド: boards / export / verify / audit
+// サブコマンド: boards / export / scrape / scboards / stamp / board-years
 package main
 
 import (
@@ -25,6 +25,8 @@ func main() {
 		err = cmdStamp(os.Args[2:])
 	case "scrape":
 		err = cmdScrape(os.Args[2:])
+	case "scboards":
+		err = cmdSCBoards(os.Args[2:])
 	case "board-years":
 		err = cmdBoardYears(os.Args[2:])
 	case "verify":
@@ -42,10 +44,12 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: kakoctl <boards|export|scrape|stamp|board-years|verify|audit> [flags]
+	fmt.Fprintln(os.Stderr, `usage: kakoctl <boards|export|scrape|scboards|stamp|board-years|verify|audit> [flags]
   boards --db <path>   boards テーブルを作成し board_idx を割り当てる
   export --db <path> --order <new|old>   インデックス用 TSV を標準出力へ
   scrape --db <path> --urls <board-urls.json>   過去ログ一覧から新規スレを取得
+                       （5chが停止中の板は 2ch.sc から補完。--source auto|5ch|sc）
+  scboards --out <json>   2ch.sc の BBSMENU から板→sc過去ログURL の対応表を作る
   stamp  --db <path>   正規化バージョンと構築時刻を kako_meta に記録
   board-years --db <path> --out <json>   検索語なしの一覧ができない(板,年)を書き出す`)
 }

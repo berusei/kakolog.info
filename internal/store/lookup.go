@@ -126,6 +126,17 @@ func Stamp(db *sql.DB, normalizerVersion int, builtAt time.Time) error {
 	return err
 }
 
+// SetMeta はメタ値を1件書き込む。kako_meta が無ければ作る。
+// スクレイパーが「sc から補完した板数」等を記録し、API のフッター表示に使う。
+func SetMeta(x execer, key, value string) error {
+	if _, err := x.Exec(metaSchema); err != nil {
+		return err
+	}
+	_, err := x.Exec(`INSERT INTO kako_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
 // Meta はメタ値を返す。テーブルや行が無ければ空文字。
 func Meta(db *sql.DB, key string) (string, error) {
 	var v string
@@ -170,4 +181,38 @@ func LoadExclusions(db *sql.DB) (map[string]bool, error) {
 		m[fmt.Sprintf("%s/%d", b, tk)] = true
 	}
 	return m, rows.Err()
+}
+
+// MaxThreadKey は DB に入っているスレッドのうち最も新しい thread_key を返す。
+//
+// 「インデックス最終更新」としてビルド時刻を表示していたのは誤りだった。
+// 取得元が止まっていても再構築は毎回走るため、データが2週間古くても「今日更新」と
+// 表示されてしまう（docs/changes/2026-08-09.md で未修正のまま持ち越した不具合）。
+// 利用者に見せるべきは「データがいつまで入っているか」であり、それがこの値である。
+//
+// threads のフルスキャンは避け、boards の各板について MAX を引く
+// （idx_threads_lookup(board_id, thread_key) により1板あたり定数時間）。
+// 未来日付の壊れたデータ（G1決定、docs/data-audit.md）は除外する。
+func MaxThreadKey(db *sql.DB, excludeFrom int64) (int64, error) {
+	boards, err := AllBoards(db)
+	if err != nil {
+		return 0, err
+	}
+	stmt, err := db.Prepare(
+		`SELECT COALESCE(MAX(thread_key), 0) FROM threads WHERE board_id = ? AND thread_key < ?`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	var max int64
+	for _, b := range boards {
+		var tk int64
+		if err := stmt.QueryRow(b.BoardID, excludeFrom).Scan(&tk); err != nil {
+			return 0, err
+		}
+		if tk > max {
+			max = tk
+		}
+	}
+	return max, nil
 }
