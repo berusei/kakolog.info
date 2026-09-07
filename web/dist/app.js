@@ -175,12 +175,6 @@ async function loadBoards() {
       $('statUpdated').textContent = d;
       $('footUpdated').textContent = 'データ最終更新: ' + d;
     }
-    if (data.sc_fallback) {
-      const n = $('srcNotice');
-      n.textContent = '現在、5ch の過去ログ倉庫が停止しているため、一部の板のスレッドを 2ch.sc から補完しています。'
-        + 'レス数が実際より少ない場合や、リンク先が開けない場合があります。';
-      n.hidden = false;
-    }
   } catch (e) {
     console.error('boards の取得に失敗', e);
   }
